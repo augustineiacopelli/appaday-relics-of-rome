@@ -26,6 +26,9 @@ Major basilicas (St. Peter’s, San Paolo fuori le Mura, Santa Maria Maggiore, S
 
 Descriptions use “traditionally venerated as” and similar language where historical attribution is a matter of long-standing devotion rather than documented certainty, consistent with how these sites are generally described.
 
+## Future Updates
+
+- Might be helpful to add mass times at churches where relics are kept to know Catholics could attend mass and non-Catholics know when not to visit so as to not interrupt services.
 -----
 
 *Part of [AppADay](https://augustineiacopelli.github.io/appaday/), a one-app-a-day build challenge.*
