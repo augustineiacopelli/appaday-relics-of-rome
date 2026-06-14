@@ -885,6 +885,98 @@ svg.leaflet-image-layer.leaflet-interactive path {
     color:var(--maroon);
   }
 
+  /* locate me button */
+  .locate-btn{
+    position:fixed;
+    right:16px;
+    bottom:76px;
+    z-index:900;
+    width:42px;
+    height:42px;
+    border-radius:50%;
+    background:var(--parchment);
+    border:1.5px solid var(--gold);
+    box-shadow:0 3px 10px rgba(0,0,0,0.3);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:20px;
+    cursor:pointer;
+  }
+  .locate-btn.active{
+    background:var(--maroon);
+    border-color:var(--gold);
+  }
+
+  /* nearest relic banner */
+  .nearest-bar{
+    position:fixed;
+    bottom:130px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:900;
+    background:var(--maroon);
+    color:var(--parchment);
+    font-family:'Cinzel', serif;
+    font-size:0.68rem;
+    letter-spacing:0.07em;
+    padding:7px 14px;
+    border-radius:999px;
+    border:1px solid var(--gold);
+    white-space:nowrap;
+    display:none;
+    max-width:90vw;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .nearest-bar.show{ display:block; }
+
+  /* simulate button */
+  .sim-btn{
+    position:fixed;
+    left:16px;
+    bottom:22px;
+    z-index:900;
+    background:rgba(43,36,32,0.75);
+    color:var(--parchment);
+    border:1px solid #6b6050;
+    border-radius:999px;
+    font-family:'Cinzel', serif;
+    font-size:0.68rem;
+    letter-spacing:0.05em;
+    padding:8px 12px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.25);
+    cursor:pointer;
+  }
+  .sim-btn.active{
+    background:var(--gold);
+    color:var(--ink);
+    border-color:var(--gold);
+  }
+
+  /* pulsing user location dot */
+  .user-dot-outer{
+    width:20px; height:20px;
+    border-radius:50%;
+    background:rgba(66,133,244,0.25);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    animation:pulse 2s infinite;
+  }
+  .user-dot-inner{
+    width:10px; height:10px;
+    border-radius:50%;
+    background:#4285F4;
+    border:2px solid #fff;
+    box-shadow:0 1px 4px rgba(0,0,0,0.4);
+  }
+  @keyframes pulse{
+    0%{ transform:scale(1); opacity:1; }
+    50%{ transform:scale(1.5); opacity:0.6; }
+    100%{ transform:scale(1); opacity:1; }
+  }
+
   .placing-banner{
     position:fixed;
     top:8px;
@@ -996,7 +1088,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <div id="map"></div>
 
 <div class="placing-banner" id="placingBanner">Tap the map to drop your pin</div>
+<button class="locate-btn" id="locateBtn" title="Show my location">📍</button>
+<div class="nearest-bar" id="nearestBar"></div>
 <button class="fab" id="fabAdd">+ Add Place</button>
+<button class="sim-btn" id="simBtn">🧪 Simulate Rome</button>
 
 <div class="modal-backdrop" id="modalBackdrop">
   <div class="modal-box">
@@ -1504,6 +1599,122 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
   setTimeout(function(){ map.invalidateSize(); }, 300);
   window.addEventListener('resize', function(){ map.invalidateSize(); });
+
+  /* ---- Geolocation ---- */
+
+  var userLat = null, userLng = null;
+  var userMarker = null;
+  var watchId = null;
+  var locating = false;
+  var locateBtn = document.getElementById('locateBtn');
+  var nearestBar = document.getElementById('nearestBar');
+
+  function userDotIcon(){
+    return L.divIcon({
+      className: '',
+      html: '<div class="user-dot-outer"><div class="user-dot-inner"></div></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+  }
+
+  function haversineM(lat1, lng1, lat2, lng2){
+    var R = 6371000;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLng = (lng2 - lng1) * Math.PI / 180;
+    var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+            Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+            Math.sin(dLng/2)*Math.sin(dLng/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function fmtDist(m){
+    if (m < 1000) { return Math.round(m) + 'm'; }
+    return (m/1000).toFixed(1) + 'km';
+  }
+
+  function updateNearest(){
+    if (userLat === null) { return; }
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < sites.length; i++){
+      var d = haversineM(userLat, userLng, sites[i].lat, sites[i].lng);
+      if (d < bestD){ bestD = d; best = sites[i]; }
+    }
+    if (best){
+      nearestBar.textContent = 'Nearest: ' + best.name + ' \u2014 ' + fmtDist(bestD);
+      nearestBar.classList.add('show');
+    }
+  }
+
+  function updatePopupDistances(){
+    // Re-bind popups that are open to show distance; distances injected on open via popupopen
+  }
+
+  // Inject distance into relic popups when user location is known
+  map.on('popupopen', function(e){
+    if (userLat === null) { return; }
+    var el = e.popup.getElement();
+    if (!el) { return; }
+    var marker = e.popup._source;
+    if (!marker || marker.siteCat === 'mine') { return; }
+    // find the matching site
+    var mlat = marker.getLatLng().lat;
+    var mlng = marker.getLatLng().lng;
+    var dist = haversineM(userLat, userLng, mlat, mlng);
+    var addrEl = el.querySelector('.card-addr');
+    if (addrEl && !addrEl.querySelector('.dist-tag')){
+      var tag = document.createElement('span');
+      tag.className = 'dist-tag';
+      tag.style.cssText = 'display:block;margin-top:4px;font-family:Cinzel,serif;font-size:0.62rem;letter-spacing:0.06em;color:var(--maroon)';
+      tag.textContent = fmtDist(dist) + ' from your location';
+      addrEl.appendChild(tag);
+    }
+  });
+
+  function onPosition(pos){
+    userLat = pos.coords.latitude;
+    userLng = pos.coords.longitude;
+    if (!userMarker){
+      userMarker = L.marker([userLat, userLng], { icon: userDotIcon(), zIndexOffset: 1000 }).addTo(map);
+    } else {
+      userMarker.setLatLng([userLat, userLng]);
+    }
+    updateNearest();
+  }
+
+  function onGeoError(err){
+    locating = false;
+    locateBtn.classList.remove('active');
+    if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    alert('Location unavailable: ' + err.message);
+  }
+
+  locateBtn.addEventListener('click', function(){
+    if (!navigator.geolocation){
+      alert('Geolocation is not supported by this browser.');
+      return;
+    }
+    if (!locating){
+      locating = true;
+      locateBtn.classList.add('active');
+      navigator.geolocation.getCurrentPosition(function(pos){
+        onPosition(pos);
+        map.setView([userLat, userLng], 15);
+        watchId = navigator.geolocation.watchPosition(onPosition, onGeoError, {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 10000
+        });
+      }, onGeoError, { enableHighAccuracy: true, timeout: 10000 });
+    } else {
+      locating = false;
+      locateBtn.classList.remove('active');
+      nearestBar.classList.remove('show');
+      if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+      if (userMarker){ map.removeLayer(userMarker); userMarker = null; }
+      userLat = null; userLng = null;
+    }
+  });
 
   /* ---- Custom "My Places" pins ---- */
 
