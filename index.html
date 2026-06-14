@@ -908,7 +908,49 @@ svg.leaflet-image-layer.leaflet-interactive path {
     border-color:var(--gold);
   }
 
-  /* nearest relic banner */
+  /* offline save button */
+  .offline-btn{
+    position:fixed;
+    right:66px;
+    bottom:76px;
+    z-index:900;
+    width:42px;
+    height:42px;
+    border-radius:50%;
+    background:var(--parchment);
+    border:1.5px solid var(--gold);
+    box-shadow:0 3px 10px rgba(0,0,0,0.3);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    cursor:pointer;
+  }
+  .offline-btn.done{
+    background:#2d6a2d;
+    border-color:#5cb85c;
+  }
+
+  /* offline progress bar */
+  .offline-progress{
+    position:fixed;
+    bottom:130px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:901;
+    background:var(--maroon);
+    color:var(--parchment);
+    font-family:'Cinzel',serif;
+    font-size:0.68rem;
+    letter-spacing:0.07em;
+    padding:7px 14px;
+    border-radius:999px;
+    border:1px solid var(--gold);
+    white-space:nowrap;
+    display:none;
+    max-width:90vw;
+  }
+  .offline-progress.show{ display:block; }
   .nearest-bar{
     position:fixed;
     bottom:130px;
@@ -1089,7 +1131,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <div class="placing-banner" id="placingBanner">Tap the map to drop your pin</div>
 <button class="locate-btn" id="locateBtn" title="Show my location">📍</button>
+<button class="offline-btn" id="offlineBtn" title="Save map for offline use">📥</button>
 <div class="nearest-bar" id="nearestBar"></div>
+<div class="offline-progress" id="offlineProgress"></div>
 <button class="fab" id="fabAdd">+ Add Place</button>
 <button class="sim-btn" id="simBtn">🧪 Simulate Rome</button>
 
@@ -1716,7 +1760,69 @@ svg.leaflet-image-layer.leaflet-interactive path {
     }
   });
 
-  /* ---- Custom "My Places" pins ---- */
+  /* ---- Service Worker registration ---- */
+
+  var offlineBtn = document.getElementById('offlineBtn');
+  var offlineProgress = document.getElementById('offlineProgress');
+  var swReg = null;
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then(function(reg) {
+      swReg = reg;
+      // Check if tiles already cached — mark button done
+      caches.open('relics-of-rome-v1').then(function(cache) {
+        cache.keys().then(function(keys) {
+          if (keys.length > 2000) {
+            offlineBtn.classList.add('done');
+            offlineBtn.title = 'Map saved for offline use';
+            offlineBtn.textContent = '✓';
+          }
+        });
+      });
+    }).catch(function(err) {
+      console.log('SW registration failed:', err);
+    });
+
+    navigator.serviceWorker.addEventListener('message', function(e) {
+      if (e.data.type === 'PRECACHE_PROGRESS') {
+        var pct = Math.round(e.data.done / e.data.total * 100);
+        offlineProgress.textContent = 'Saving map\u2026 ' + pct + '%';
+      }
+      if (e.data.type === 'PRECACHE_DONE') {
+        offlineProgress.classList.remove('show');
+        offlineBtn.classList.add('done');
+        offlineBtn.title = 'Map saved for offline use';
+        offlineBtn.textContent = '\u2713';
+        if (e.data.failed > 0) {
+          offlineProgress.textContent = 'Saved with ' + e.data.failed + ' tiles missing \u2014 retry on WiFi';
+          offlineProgress.classList.add('show');
+          setTimeout(function(){ offlineProgress.classList.remove('show'); }, 4000);
+        }
+      }
+    });
+  } else {
+    offlineBtn.style.display = 'none';
+  }
+
+  offlineBtn.addEventListener('click', function() {
+    if (offlineBtn.classList.contains('done')) {
+      offlineProgress.textContent = 'Map already saved for offline use';
+      offlineProgress.classList.add('show');
+      setTimeout(function(){ offlineProgress.classList.remove('show'); }, 2500);
+      return;
+    }
+    if (!navigator.serviceWorker.controller) {
+      offlineProgress.textContent = 'Getting ready\u2026 try again in a moment';
+      offlineProgress.classList.add('show');
+      setTimeout(function(){ offlineProgress.classList.remove('show'); }, 2500);
+      return;
+    }
+    offlineProgress.textContent = 'Starting download\u2026';
+    offlineProgress.classList.add('show');
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_TILES' });
+  });
+
+
 
   var STORAGE_KEY = 'appaday038-places';
   var customPlaces = [];
